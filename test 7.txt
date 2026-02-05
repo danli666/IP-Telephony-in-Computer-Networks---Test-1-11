@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         Test 7
+// @name         Test 7 - Auto Select on Hover
 // @namespace    http://tampermonkey.net/
-// @version      6.0
-// @description  Автоматически выбирает все правильные ответы и нажимает "Ответить"
+// @version      6.3
+// @description  Автоматически выбирает правильные ответы при наведении курсора
 // @author       You
 // @match        https://intuit.ru/studies/courses/8/8/test/1/125
 // @grant        none
@@ -138,9 +138,11 @@
     ]
 };
 
-    let currentAnswerIndex = 0;
-    let currentQuestionAnswers = null;
-    let selectedAnswersCount = 0;
+    let currentQuestionText = null;
+    let currentCorrectAnswers = null;
+    let hoverEnabled = true;
+    let hoverTimer = null;
+    let currentHoverElement = null;
 
     // Функция для нормализации текста
     function normalizeText(text) {
@@ -160,24 +162,21 @@
         return normalizedOption === normalizedCorrect;
     }
 
-    // Функция для поиска всех подходящих вопросов
-    function findAllMatchingQuestions(questionText) {
+    // Функция для поиска правильных ответов для текущего вопроса
+    function findCorrectAnswersForQuestion(questionText) {
         const normalizedQuestion = normalizeText(questionText);
-        let matchingQuestions = [];
 
         for (const [question, answers] of Object.entries(correctAnswerTexts)) {
             const normalizedDbQuestion = normalizeText(question);
 
             // Точное совпадение
             if (normalizedQuestion === normalizedDbQuestion) {
-                matchingQuestions.push({ question, answers, type: 'exact', priority: 1 });
-                continue;
+                return answers;
             }
 
             // Содержание
             if (normalizedQuestion.includes(normalizedDbQuestion) || normalizedDbQuestion.includes(normalizedQuestion)) {
-                matchingQuestions.push({ question, answers, type: 'contains', priority: 2 });
-                continue;
+                return answers;
             }
 
             // Частичное совпадение
@@ -187,143 +186,164 @@
             const matchPercentage = matchingWords.length / Math.min(questionWords.length, dbWords.length);
 
             if (matchPercentage >= 0.8) {
-                matchingQuestions.push({ question, answers, type: 'partial', priority: 3, percentage: matchPercentage });
+                return answers;
             }
         }
 
-        // Сортируем по приоритету
-        matchingQuestions.sort((a, b) => a.priority - b.priority);
-
-        return matchingQuestions;
+        return null;
     }
 
-    // Функция для выбора одного ответа по очереди
-    function selectNextAnswer() {
-        console.log('🎯 ВЫБОР СЛЕДУЮЩЕГО ОТВЕТА');
-
+    // Функция для получения текущего вопроса
+    function getCurrentQuestion() {
         let questionElement = document.querySelector('.question');
         if (!questionElement) {
             questionElement = document.querySelector('.task_title');
         }
 
         if (!questionElement) {
-            console.log('❌ Элемент вопроса не найден');
-            return;
+            return null;
         }
 
-        const questionText = questionElement.textContent.trim();
-
-        // Если это новый вопрос, найдем все правильные ответы
-        if (!currentQuestionAnswers) {
-            console.log(`📝 НОВЫЙ ВОПРОС: "${questionText}"`);
-
-            const matchingQuestions = findAllMatchingQuestions(questionText);
-
-            if (matchingQuestions.length === 0) {
-                console.log('❌ Подходящие вопросы не найдены');
-                return;
-            }
-
-            // Берем первый подходящий вопрос
-            currentQuestionAnswers = matchingQuestions[0].answers;
-            currentAnswerIndex = 0;
-            selectedAnswersCount = 0;
-
-            console.log(`✅ ПРАВИЛЬНЫЕ ОТВЕТЫ (${currentQuestionAnswers.length}):`, currentQuestionAnswers);
-        }
-
-        // Если все ответы уже выбраны
-        if (currentAnswerIndex >= currentQuestionAnswers.length) {
-            console.log('✅ ВСЕ ОТВЕТЫ ВЫБРАНЫ! Можете нажать "Ответить" вручную.');
-            // Сбрасываем для следующего вопроса
-            currentQuestionAnswers = null;
-            currentAnswerIndex = 0;
-            selectedAnswersCount = 0;
-            return;
-        }
-
-        const targetAnswer = currentQuestionAnswers[currentAnswerIndex];
-        console.log(`🔍 ИЩЕМ ОТВЕТ ${currentAnswerIndex + 1}/${currentQuestionAnswers.length}: "${targetAnswer}"`);
-
-        let answerOptions = document.querySelectorAll('.wrapper label.option');
-        if (answerOptions.length === 0) {
-            answerOptions = document.querySelectorAll('label.option');
-        }
-
-        if (answerOptions.length === 0) {
-            console.log('❌ Варианты ответов не найдены');
-            return;
-        }
-
-        let found = false;
-
-        answerOptions.forEach((option, index) => {
-            if (found) return;
-
-            const rightSpan = option.querySelector('.right');
-            const optionText = rightSpan ? rightSpan.textContent : option.textContent;
-
-            console.log(`   Проверяем вариант ${index + 1}: "${optionText.trim()}"`);
-
-            if (textsMatch(optionText, targetAnswer)) {
-                let input = option.querySelector('input[type="radio"], input[type="checkbox"]');
-                if (input && !input.checked) {
-                    input.checked = true;
-                    input.dispatchEvent(new Event('change', { bubbles: true }));
-                    input.dispatchEvent(new Event('click', { bubbles: true }));
-                    console.log(`✅ ВЫБРАН вариант ${index + 1}: "${optionText.trim()}"`);
-                    found = true;
-                    selectedAnswersCount++;
-                    currentAnswerIndex++;
-                } else if (input && input.checked) {
-                    console.log(`⚠️ Вариант ${index + 1} уже выбран, переходим к следующему`);
-                    found = true;
-                    currentAnswerIndex++;
-                }
-            }
-        });
-
-        if (!found) {
-            console.log(`❌ Ответ "${targetAnswer}" не найден, переходим к следующему`);
-            currentAnswerIndex++;
-
-            // Если не нашли текущий ответ, пробуем следующий
-            if (currentAnswerIndex < currentQuestionAnswers.length) {
-                setTimeout(() => selectNextAnswer(), 500);
-            }
-        }
-
-        console.log(`📊 ПРОГРЕСС: ${selectedAnswersCount}/${currentQuestionAnswers.length} ответов выбрано`);
+        return questionElement.textContent.trim();
     }
 
-    // Обработчик клавиш
-    function handleKeyPress(event) {
-        if (event.key === '2' || event.keyCode === 50) {
-            if (event.target.tagName !== 'INPUT' && event.target.tagName !== 'TEXTAREA') {
-                event.preventDefault();
-                selectNextAnswer();
-            }
+    // Функция для обновления кэша правильных ответов
+    function updateCorrectAnswersCache() {
+        const questionText = getCurrentQuestion();
+
+        if (!questionText) {
+            currentQuestionText = null;
+            currentCorrectAnswers = null;
+            return;
         }
 
-        // Клавиша R для сброса
-        if (event.key === 'r' || event.key === 'R') {
-            if (event.target.tagName !== 'INPUT' && event.target.tagName !== 'TEXTAREA') {
-                currentQuestionAnswers = null;
-                currentAnswerIndex = 0;
-                selectedAnswersCount = 0;
-                console.log('🔄 Состояние сброшено');
+        // Если вопрос изменился
+        if (questionText !== currentQuestionText) {
+            console.log(`📝 Текущий вопрос: "${questionText}"`);
+            currentQuestionText = questionText;
+            currentCorrectAnswers = findCorrectAnswersForQuestion(questionText);
+
+            if (currentCorrectAnswers) {
+                console.log(`✅ Найдены правильные ответы (${currentCorrectAnswers.length}):`, currentCorrectAnswers);
+            } else {
+                console.log('❌ Правильные ответы не найдены');
             }
+        }
+    }
+
+    // Функция для проверки, является ли вариант ответа правильным
+    function isOptionCorrect(optionElement) {
+        if (!currentCorrectAnswers || !hoverEnabled) return false;
+
+        const rightSpan = optionElement.querySelector('.right');
+        const optionText = rightSpan ? rightSpan.textContent : optionElement.textContent;
+
+        return currentCorrectAnswers.some(correctAnswer =>
+            textsMatch(optionText, correctAnswer)
+        );
+    }
+
+    // Функция для выбора варианта ответа
+    function selectOption(optionElement) {
+        if (!hoverEnabled) return;
+
+        const input = optionElement.querySelector('input[type="radio"], input[type="checkbox"]');
+        if (!input) return;
+
+        if (!input.checked) {
+            input.checked = true;
+            input.dispatchEvent(new Event('change', { bubbles: true }));
+            input.dispatchEvent(new Event('click', { bubbles: true }));
+
+            console.log(`✅ Автоматически выбран: "${optionElement.textContent.trim()}"`);
+        }
+    }
+
+    // Обработчик наведения мыши
+    function handleMouseOver(event) {
+        updateCorrectAnswersCache();
+
+        let target = event.target;
+
+        // Ищем родительский элемент с классом option
+        while (target && !target.classList?.contains('option')) {
+            target = target.parentElement;
+            if (!target || target === document.body) return;
+        }
+
+        if (!target || !target.classList.contains('option')) return;
+
+        // Проверяем, правильный ли это ответ
+        if (isOptionCorrect(target)) {
+            currentHoverElement = target;
+
+            // Запускаем таймер с задержкой 500ms
+            hoverTimer = setTimeout(() => {
+                if (currentHoverElement === target) {
+                    selectOption(target);
+                    currentHoverElement = null;
+                }
+            }, 500); // 0.5 секунды задержки
+        }
+    }
+
+    // Обработчик ухода мыши с элемента
+    function handleMouseOut(event) {
+        let target = event.target;
+
+        // Ищем родительский элемент с классом option
+        while (target && !target.classList?.contains('option')) {
+            target = target.parentElement;
+            if (!target || target === document.body) return;
+        }
+
+        if (!target || !target.classList.contains('option')) return;
+
+        // Если ушли с элемента, который был наведен, отменяем таймер
+        if (target === currentHoverElement) {
+            clearTimeout(hoverTimer);
+            hoverTimer = null;
+            currentHoverElement = null;
+        }
+    }
+
+    // Обработчик клавиш для отладки
+    function handleKeyPress(event) {
+        // Ctrl+Shift+D для вывода отладочной информации
+        if (event.ctrlKey && event.shiftKey && event.key === 'D') {
+            console.log('=== ОТЛАДОЧНАЯ ИНФОРМАЦИЯ ===');
+            console.log('Текущий вопрос:', currentQuestionText);
+            console.log('Правильные ответы:', currentCorrectAnswers);
+            console.log('Автовыбор включен:', hoverEnabled);
+        }
+
+        // Ctrl+Shift+T для переключения режима
+        if (event.ctrlKey && event.shiftKey && event.key === 'T') {
+            hoverEnabled = !hoverEnabled;
+            console.log(hoverEnabled ? '✅ Автовыбор включен' : '❌ Автовыбор выключен');
         }
     }
 
     // Инициализация
     function init() {
+        // Добавляем обработчик наведения мыши
+        document.addEventListener('mouseover', handleMouseOver);
+        document.addEventListener('mouseout', handleMouseOut);
+
+        // Добавляем обработчик клавиш для отладки
         document.addEventListener('keydown', handleKeyPress);
-        document.addEventListener('keypress', handleKeyPress);
-        console.log('🚀 СКРИПТ INTUIT AUTO COMPLETE ЗАПУЩЕН!');
-        console.log('📋 Нажмите "2" для выбора следующего правильного ответа');
+
+        // Обновляем кэш при клике (для перехода к следующему вопросу)
+        document.addEventListener('click', updateCorrectAnswersCache);
+
+        console.log('🚀 СКРИПТ АВТОВЫБОРА ЗАПУЩЕН!');
+        console.log('🎯 Наведите курсор на правильный ответ для автоматического выбора');
+        console.log('⏱️  Автовыбор произойдет через 0.5 секунды после наведения');
+        console.log('🔄 Нажмите Ctrl+Shift+T для переключения режима автовыбора');
+        console.log('📊 Нажмите Ctrl+Shift+D для отладочной информации');
     }
 
+    // Запуск при загрузке страницы
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', init);
     } else {
