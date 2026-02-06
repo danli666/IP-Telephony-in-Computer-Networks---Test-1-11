@@ -1,0 +1,15 @@
+1. Зайти в консоль (F12).
+2. Нужно ввести побуквенно текст: allow pasting.
+3. Вставить этот код:
+
+// Отключаем контекстное меню
+
+document.addEventListener('contextmenu', e => e.preventDefault());
+
+// Отключаем другие события правой кнопки
+
+document.addEventListener('mousedown', e => { if (e.button === 2) e.preventDefault(); });
+
+document.addEventListener('mouseup', e => { if (e.button === 2) e.preventDefault(); });
+
+4. Поздравляю, у вас правая кнопка мыши будет не работать (будет только звук), пока вы не перезагрузите страницу.
